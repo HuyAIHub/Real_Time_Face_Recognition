@@ -7,7 +7,7 @@ from Read_message_consumer import ReadMessageConsumer
 from load_model import load_model_arcface
 import threading
 import numpy as np
-import time, os,io
+import time, os,io,sys
 from datetime import datetime,date
 from glob_var import GlobVar,db_connect,minio_connect,Const
 
@@ -29,45 +29,52 @@ model_face_detect = model_face_detect.to(device)
 #Declare Variable 
 dict_check = dict.fromkeys([],1)
 lst_people = []
-number_reg = 20
-
+number_reg = 15
+number_unknown_recog = 100
 def Gun(frame,labels,number_reg):
-    current_time = datetime.now().strftime("%Y-%m-%d_%H:%M")
+    current_time = datetime.now().strftime("%Y-%m-%d_%H:%M.%f")
     dict_check[labels[0]] = dict_check[labels[0]] + 1 if labels[0] in dict_check else 1
     if dict_check[labels[0]] >= number_reg and labels[0] not in lst_people:
         lst_people.append(labels[0])
         path_img = Push_MinIo(frame,labels)
         Push_database(labels[0],path_img)
-        cv2.imwrite(os.getcwd() + '/outputs/'+labels[0]+'_'+current_time +'.jpg',frame)
+        # cv2.imwrite(os.getcwd() + '/outputs/'+labels[0]+'_'+current_time +'.jpg',frame)
         print('Gun at: ',current_time)
+
+lst_time = ['05:59:50','06:59:50','07:29:50']
 class RunModel(threading.Thread):
     def __init__(self):
         super().__init__()
-        # self.rtsp = '/home/aitraining/Desktop/yolov5-face/folder_test/output.avi'
+        self.rtsp = '/home/aitraining/workspace/huydq46/yolov5_arcface/IMG_0150.MOV'
         # self.rtsp = "/home/aitraining/workspace/datnh14/LPR/dataset/20220722_095149_CAM2.mp4"
-        self.rtsp = 'rtsp://vcc_cam:Vcc12345678@172.18.0.21:554/stream1'
+        # self.rtsp = 'rtsp://vcc_cam:Vcc12345678@172.18.0.21:554/stream1'
     def run(self):
         frame_count = 0
         cap = cv2.VideoCapture(self.rtsp)
         error_frame = 0
         no_people_check = 0
-        while True:
+        while True: 
             timer = cv2.getTickCount()
+            # if datetime.now().strftime("%H:%M:%S") in lst_time:
+            #     sys.exit()
             if frame_count % 1 == 0:
                 try:
                     ret, frame = cap.read()
                     frame = cv2.resize(frame, (0,0), fx=0.8, fy=0.8)
-                except:
-                    print('camera loi roi!')
+                    frame = cv2.rotate(frame,cv2.ROTATE_180)
+                except BaseException as error:
+                    print('camera loi roi!: ',error)
                     cap = cv2.VideoCapture(self.rtsp)
                     error_frame += 1
-                    if error_frame == 100: break
+                    if error_frame == 10:
+                        print("chet o error frame!")
+                        error_frame = 0
+                        break
                     continue
                 if not ret:
                     cap = cv2.VideoCapture(self.rtsp)
                     continue
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
                 img_processed = processing_input(frame,img_size,model_face_detect)
                 results = model_face_detect(img_processed)[0]
                 result_boxes, result_scores, result_landmark = process_output(results,img_processed,frame,conf_thres,iou_thres)
@@ -81,13 +88,15 @@ class RunModel(threading.Thread):
                     nimg = img_warped_preprocess(frame_rgb, bbox, landmark, image_size='112,112')
                     nimg = cv2.cvtColor(nimg, cv2.COLOR_BGR2RGB)
                     # cv2.imshow('check face',nimg)
-
                     labels, np_feature = GlobVar.arcface.predict(nimg, print_info=True)
-
                     frame = show_results(frame, bbox,labels[0])
-                    Gun(frame,labels,number_reg)
-                    if dict_check[labels[0]] >= number_reg:
-                        break
+
+                    if labels[0] == 'unknown':
+                        Gun(frame,labels,number_unknown_recog)
+                    else: Gun(frame,labels,number_reg)
+                    # Gun(frame,labels,number_reg)
+                    # if dict_check[labels[0]] >= number_reg:
+                    #     break
                 if len(result_boxes) == 0:
                     # 40 frame lien tiep k co box se xoa
                     no_people_check += 1
@@ -115,4 +124,5 @@ if __name__ == '__main__':
     runModel = RunModel()
     runModel.start()
     loadmodel = load_model_arcface()
+#77956
     
